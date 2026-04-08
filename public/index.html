@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Echo Chain — Demo</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #09090f;
+    --surface:   #11111a;
+    --card:      #181824;
+    --border:    #26263a;
+    --text:      #ddddf0;
+    --muted:     #5a5a80;
+    --accent:    #7c6fcd;
+
+    --do:  #ff5566;
+    --re:  #ff9944;
+    --mi:  #ffdd33;
+    --fa:  #44cc77;
+    --sol: #33cccc;
+    --la:  #448aff;
+    --ti:  #aa44ff;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Helvetica Neue', Arial, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+  }
+
+  /* ── Header ─────────────────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding: 28px 40px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  header h1 { font-size: 22px; font-weight: 600; letter-spacing: 0.04em; }
+  header h1 span { color: var(--accent); }
+  header p  { color: var(--muted); font-size: 13px; }
+
+  /* ── Main layout ─────────────────────────────────────────────────── */
+  main {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    padding: 32px 40px;
+    max-width: 1100px;
+  }
+
+  /* ── Device panels ───────────────────────────────────────────────── */
+  .devices {
+    display: grid;
+    grid-template-columns: 1fr 64px 1fr;
+    align-items: center;
+    gap: 0;
+  }
+
+  .device-card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+  }
+
+  .device-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 20px;
+  }
+  .device-label { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+  .device-id    { font-size: 16px; font-weight: 600; margin-top: 2px; }
+
+  .status-dot {
+    width: 9px; height: 9px;
+    border-radius: 50%;
+    background: var(--muted);
+    transition: background 0.3s;
+  }
+  .status-dot.online  { background: #44cc77; box-shadow: 0 0 6px #44cc77; }
+  .status-dot.waiting { background: #ffdd33; box-shadow: 0 0 6px #ffdd33;
+                        animation: pulse 1.4s ease-in-out infinite; }
+
+  @keyframes pulse {
+    0%,100% { opacity: 1; } 50% { opacity: 0.35; }
+  }
+
+  /* ── Note buttons ────────────────────────────────────────────────── */
+  .notes {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .note-btn {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    border-radius: 8px;
+    border: 1px solid transparent;
+    background: var(--surface);
+    cursor: pointer;
+    transition: transform 0.08s, opacity 0.08s;
+    user-select: none;
+  }
+  .note-btn:active { transform: scale(0.97); }
+
+  .note-pip {
+    width: 12px; height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: box-shadow 0.15s;
+  }
+  .note-name  { font-weight: 600; font-size: 13px; width: 28px; }
+  .note-freq  { color: var(--muted); font-size: 12px; font-family: monospace; }
+
+  .note-btn.firing {
+    animation: fire 0.35s ease-out forwards;
+  }
+  @keyframes fire {
+    0%   { opacity: 1; transform: scale(1);    border-color: transparent; }
+    25%  { opacity: 1; transform: scale(1.03); }
+    100% { opacity: 1; transform: scale(1);    border-color: transparent; }
+  }
+
+  .note-btn.incoming {
+    animation: incoming 0.4s ease-out forwards;
+  }
+  @keyframes incoming {
+    0%   { transform: scale(1);    }
+    20%  { transform: scale(1.05); }
+    100% { transform: scale(1);    }
+  }
+
+  /* ── Bridge arrow ────────────────────────────────────────────────── */
+  .bridge {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+  .bridge-icon { font-size: 20px; }
+
+  /* ── Event log ───────────────────────────────────────────────────── */
+  .log-section { }
+  .section-title {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .log-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    height: 140px;
+    overflow-y: auto;
+    padding: 12px 16px;
+    font-family: monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: var(--muted);
+  }
+  .log-box .entry { display: block; }
+  .log-box .entry .ts   { color: #333355; }
+  .log-box .entry .src  { font-weight: bold; }
+  .log-box .entry .note { }
+
+  /* ── System notes ────────────────────────────────────────────────── */
+  .notes-section { }
+  details { }
+  summary {
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 4px 0;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    user-select: none;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before {
+    content: '▶';
+    font-size: 9px;
+    transition: transform 0.2s;
+  }
+  details[open] summary::before { transform: rotate(90deg); }
+
+  .system-notes {
+    margin-top: 14px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 20px 24px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px 40px;
+  }
+
+  .note-block h3 {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 8px;
+  }
+  .note-block p, .note-block li {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.65;
+  }
+  .note-block ul { padding-left: 16px; }
+  .note-block li { margin-bottom: 3px; }
+
+  .arch-diagram {
+    font-family: monospace;
+    font-size: 12px;
+    color: #4a4a70;
+    line-height: 1.8;
+    white-space: pre;
+    background: var(--card);
+    border-radius: 6px;
+    padding: 12px 14px;
+    margin-top: 8px;
+  }
+  .arch-diagram .hi { color: var(--accent); }
+
+  /* ── Scrollbar ───────────────────────────────────────────────────── */
+  .log-box::-webkit-scrollbar { width: 4px; }
+  .log-box::-webkit-scrollbar-track { background: transparent; }
+  .log-box::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Echo <span>Chain</span></h1>
+  <p>WebSocket relay demo — pair_001</p>
+</header>
+
+<main>
+
+  <!-- ── Device panels ── -->
+  <div class="devices">
+
+    <!-- Device A -->
+    <div class="device-card" id="cardA">
+      <div class="device-header">
+        <div>
+          <div class="device-label">Device A</div>
+          <div class="device-id">echoA-01</div>
+        </div>
+        <div class="status-dot waiting" id="dotA" title="connecting…"></div>
+      </div>
+      <div class="notes" id="notesA"></div>
+    </div>
+
+    <!-- Bridge -->
+    <div class="bridge">
+      <div class="bridge-icon">⇄</div>
+      <div>relay</div>
+    </div>
+
+    <!-- Device B -->
+    <div class="device-card" id="cardB">
+      <div class="device-header">
+        <div>
+          <div class="device-label">Device B</div>
+          <div class="device-id">echoB-02</div>
+        </div>
+        <div class="status-dot waiting" id="dotB" title="connecting…"></div>
+      </div>
+      <div class="notes" id="notesB"></div>
+    </div>
+
+  </div>
+
+  <!-- ── Event log ── -->
+  <div class="log-section">
+    <div class="section-title">Live Events</div>
+    <div class="log-box" id="log">
+      <span class="entry"><span class="ts">--:--:-- </span><span class="muted">waiting for connections…</span></span>
+    </div>
+  </div>
+
+  <!-- ── System notes ── -->
+  <div class="notes-section">
+    <details>
+      <summary>System Notes</summary>
+      <div class="system-notes">
+
+        <div class="note-block">
+          <h3>What is Echo Chain?</h3>
+          <p>A pair of physical devices that mirror musical note presses between each other in real time. Press a button on one device — the partner device lights up and sounds the same note, wherever it is in the world.</p>
+          <br>
+          <ul>
+            <li>7 notes per device (Do → Ti)</li>
+            <li>LED + piezo buzzer output per note</li>
+            <li>ESP32-based hardware (WiFi + Bluetooth)</li>
+          </ul>
+        </div>
+
+        <div class="note-block">
+          <h3>Current Architecture</h3>
+          <div class="arch-diagram"><span class="hi">[ Device A ]</span>  ←─ ESP-NOW ─→  <span class="hi">[ Device B ]</span>
+   (local only, ~200m)
+
+<span class="hi">[ Device A ]</span>  ──────────────────────  <span class="hi">[ Device B ]</span>
+       ↕                                    ↕
+  <span class="hi">[ Heroku WS ]</span>  ←── relay ──→  <span class="hi">[ Heroku WS ]</span>
+       ↕                                    ↕
+  <span class="hi">[ Firebase ]</span>             <span class="hi">[ Firebase ]</span>
+  (event log)              (event log)</div>
+        </div>
+
+        <div class="note-block">
+          <h3>This Demo</h3>
+          <p>Both panels above share one WebSocket relay server. Triggering a note on Device A sends a <code>note</code> message to the server, which routes it to Device B's connection. No hardware required — the relay path is real.</p>
+          <br>
+          <p>The web interface here is a <strong>dummy trigger</strong> for demonstration. In production, this path is handled by the ESP32 firmware using the same message protocol.</p>
+        </div>
+
+        <div class="note-block">
+          <h3>Next Steps</h3>
+          <ul>
+            <li>Visual design pass on this interface</li>
+            <li>Update ESP32 firmware to connect via WebSocket (internet range)</li>
+            <li>Pair management UI (create / join pair codes)</li>
+            <li>Deploy relay to Heroku production</li>
+            <li>Firebase event history view</li>
+          </ul>
+        </div>
+
+      </div>
+    </details>
+  </div>
+
+</main>
+
+<script>
+  const NOTES = [
+    { name: 'Do',  freq: 262, color: 'var(--do)'  },
+    { name: 'Re',  freq: 294, color: 'var(--re)'  },
+    { name: 'Mi',  freq: 330, color: 'var(--mi)'  },
+    { name: 'Fa',  freq: 349, color: 'var(--fa)'  },
+    { name: 'Sol', freq: 392, color: 'var(--sol)' },
+    { name: 'La',  freq: 440, color: 'var(--la)'  },
+    { name: 'Ti',  freq: 494, color: 'var(--ti)'  },
+  ];
+
+  const WS_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+
+  // ── Build note buttons ──────────────────────────────────────────────
+  function buildButtons(containerId, onClickFn) {
+    const container = document.getElementById(containerId);
+    NOTES.forEach((note, i) => {
+      const btn = document.createElement('div');
+      btn.className = 'note-btn';
+      btn.id = `${containerId}-note-${i}`;
+      btn.style.cursor = onClickFn ? 'pointer' : 'default';
+      btn.innerHTML = `
+        <div class="note-pip" style="background:${note.color}"></div>
+        <div class="note-name">${note.name}</div>
+        <div class="note-freq">${note.freq} Hz</div>
+      `;
+      if (onClickFn) {
+        btn.addEventListener('click', () => onClickFn(i));
+      }
+      container.appendChild(btn);
+    });
+  }
+
+  buildButtons('notesA', (i) => triggerNote('A', i));
+  buildButtons('notesB', (i) => triggerNote('B', i));
+
+  // ── Log ─────────────────────────────────────────────────────────────
+  function log(text, color) {
+    const box = document.getElementById('log');
+    const now = new Date();
+    const ts   = now.toTimeString().slice(0,8);
+    const entry = document.createElement('span');
+    entry.className = 'entry';
+    entry.innerHTML = `<span class="ts">${ts} </span><span style="color:${color||'var(--muted)'};">${text}</span>`;
+    box.appendChild(document.createElement('br'));
+    box.appendChild(entry);
+    box.scrollTop = box.scrollHeight;
+  }
+
+  // ── Status dots ──────────────────────────────────────────────────────
+  function setDot(id, state) { // 'waiting' | 'online' | 'offline'
+    const dot = document.getElementById(id);
+    dot.className = 'status-dot ' + state;
+  }
+
+  // ── Note animation ───────────────────────────────────────────────────
+  function animateNote(containerId, noteId, animClass) {
+    const btn = document.getElementById(`${containerId}-note-${noteId}`);
+    if (!btn) return;
+    btn.style.background = NOTES[noteId].color + '22';
+    btn.style.borderColor = NOTES[noteId].color + '66';
+    btn.classList.remove('firing', 'incoming');
+    void btn.offsetWidth; // reflow to restart animation
+    btn.classList.add(animClass);
+    setTimeout(() => {
+      btn.style.background = '';
+      btn.style.borderColor = '';
+      btn.classList.remove(animClass);
+    }, 400);
+  }
+
+  // ── WebSocket connections ─────────────────────────────────────────
+  let wsA, wsB;
+
+  function connect(deviceId, pairId, dotId, onNote) {
+    const ws = new WebSocket(WS_URL);
+
+    ws.addEventListener('open', () => {
+      ws.send(JSON.stringify({ type: 'join', pair_id: pairId, device_id: deviceId }));
+    });
+
+    ws.addEventListener('message', (e) => {
+      const msg = JSON.parse(e.data);
+
+      if (msg.type === 'joined') {
+        setDot(dotId, 'waiting');
+        log(`${deviceId} connected — waiting for partner`, '#5a5a80');
+      }
+      if (msg.type === 'partner_joined') {
+        setDot(dotId, 'online');
+        log(`${deviceId} ↔ partner online`, '#44cc77');
+      }
+      if (msg.type === 'partner_left') {
+        setDot(dotId, 'waiting');
+        log(`${deviceId}: partner disconnected`, '#ff9944');
+      }
+      if (msg.type === 'note') {
+        onNote(msg.note_id);
+      }
+    });
+
+    ws.addEventListener('close', () => {
+      setDot(dotId, 'waiting');
+      setTimeout(() => connect(deviceId, pairId, dotId, onNote), 2000);
+    });
+
+    ws.addEventListener('error', () => ws.close());
+
+    return ws;
+  }
+
+  // Device A — sends notes, receives nothing in this demo (B is the receiver)
+  wsA = connect('echoA-01', 'pair_001', 'dotA', (noteId) => {
+    // A can also receive from B in a real setup; animate accordingly
+    animateNote('notesA', noteId, 'incoming');
+    log(`← echoB-02 sent ${NOTES[noteId].name} (${NOTES[noteId].freq} Hz)`, NOTES[noteId].color.replace('var(', '').replace(')', ''));
+  });
+
+  // Device B — receive-only in this demo
+  wsB = connect('echoB-02', 'pair_001', 'dotB', (noteId) => {
+    animateNote('notesB', noteId, 'incoming');
+    log(`→ echoA-01 triggered ${NOTES[noteId].name} (${NOTES[noteId].freq} Hz) on Device B`, NOTES[noteId].color.replace('var(', '').replace(')', ''));
+  });
+
+  // ── Trigger (Device A button click) ──────────────────────────────
+  function triggerNote(device, noteId) {
+    const ws          = device === 'A' ? wsA : wsB;
+    const containerId = device === 'A' ? 'notesA' : 'notesB';
+    const senderId    = device === 'A' ? 'echoA-01' : 'echoB-02';
+    if (!ws || ws.readyState !== 1) return;
+    animateNote(containerId, noteId, 'firing');
+    ws.send(JSON.stringify({ type: 'note', note_id: noteId }));
+    log(`${senderId} pressed ${NOTES[noteId].name} (${NOTES[noteId].freq} Hz) →`, NOTES[noteId].color.replace('var(', '').replace(')', ''));
+  }
+</script>
+</body>
+</html>

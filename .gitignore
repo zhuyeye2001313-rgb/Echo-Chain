@@ -1,0 +1,7 @@
+node_modules/
+.env
+*.log
+.DS_Store
+
+# Exclude test sketches with real credentials — never commit these
+esp_test_sketch/
