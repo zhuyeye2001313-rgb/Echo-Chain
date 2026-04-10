@@ -92,4 +92,11 @@ wss.on('connection', (ws) => {
   });
 });
 
+// Keepalive — ping every 25s to prevent Heroku H15 idle timeout (55s limit)
+setInterval(() => {
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) client.ping();
+  });
+}, 25000);
+
 server.listen(PORT, () => console.log(`Echo Chain relay → http://localhost:${PORT}`));
