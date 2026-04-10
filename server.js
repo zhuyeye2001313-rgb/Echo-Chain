@@ -87,13 +87,22 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     if (!ctx) return;
     const { pair_id, device_id } = ctx;
-    const partnerEntry = getPartnerEntry(pair_id, device_id);
-    if (partnerEntry) send(partnerEntry[1].ws, { type: 'partner_left' });
-    if (rooms[pair_id]) {
+
+    // Only clean up if THIS ws is still the active one in the room.
+    // Displaced connections share the same device_id — without this check
+    // a stale web connection closing would delete the hardware entry.
+    const isActive = rooms[pair_id]
+      && rooms[pair_id][device_id]
+      && rooms[pair_id][device_id].ws === ws;
+
+    if (isActive) {
+      const partnerEntry = getPartnerEntry(pair_id, device_id);
+      if (partnerEntry) send(partnerEntry[1].ws, { type: 'partner_left' });
       delete rooms[pair_id][device_id];
       if (!Object.keys(rooms[pair_id]).length) delete rooms[pair_id];
     }
-    console.log(`[${pair_id}] - ${device_id}`);
+
+    console.log(`[${pair_id}] - ${device_id}${isActive ? '' : ' (stale, ignored)'}`);
   });
 });
 
