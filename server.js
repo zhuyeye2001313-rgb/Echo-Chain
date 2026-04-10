@@ -18,21 +18,14 @@ const server = http.createServer((req, res) => {
 // ── WebSocket relay ───────────────────────────────────────────────────
 const wss = new WebSocketServer({ server });
 
-// rooms[pair_id][device_id] = ws
+// rooms[pair_id][device_id] = { ws, client_type }
+// client_type: 'web' | 'device'
 const rooms = {};
 
-function getPartner(pair_id, device_id) {
+function getPartnerEntry(pair_id, device_id) {
   const room = rooms[pair_id];
   if (!room) return null;
-  const entry = Object.entries(room).find(([id]) => id !== device_id);
-  return entry ? entry[1] : null;
-}
-
-function getPartnerID(pair_id, device_id) {
-  const room = rooms[pair_id];
-  if (!room) return null;
-  const entry = Object.entries(room).find(([id]) => id !== device_id);
-  return entry ? entry[0] : null;
+  return Object.entries(room).find(([id]) => id !== device_id) || null;
 }
 
 function send(ws, payload) {
@@ -49,41 +42,53 @@ wss.on('connection', (ws) => {
     // ── join ──────────────────────────────────────────────────────────
     if (msg.type === 'join') {
       const { pair_id, device_id } = msg;
+      const client_type = msg.client_type || 'web';
       if (!pair_id || !device_id) return;
 
       rooms[pair_id] = rooms[pair_id] || {};
-      rooms[pair_id][device_id] = ws;
-      ctx = { pair_id, device_id };
 
-      send(ws, { type: 'joined', device_id, pair_id });
-
-      // notify both sides if partner already present
-      const partnerWS = getPartner(pair_id, device_id);
-      const partnerID = getPartnerID(pair_id, device_id);
-      if (partnerWS) {
-        send(partnerWS, { type: 'partner_joined', partner_id: device_id });
-        send(ws,        { type: 'partner_joined', partner_id: partnerID });
+      // If slot already occupied, displace the old connection
+      if (rooms[pair_id][device_id]) {
+        send(rooms[pair_id][device_id].ws, { type: 'displaced', by: client_type });
       }
 
-      console.log(`[${pair_id}] + ${device_id}`);
+      rooms[pair_id][device_id] = { ws, client_type };
+      ctx = { pair_id, device_id };
+
+      // Confirm join to self
+      send(ws, { type: 'joined', device_id, pair_id, client_type });
+
+      // Notify both sides if partner already present
+      const partnerEntry = getPartnerEntry(pair_id, device_id);
+      if (partnerEntry) {
+        const [partnerID, partnerSlot] = partnerEntry;
+        // Tell partner a new client joined this slot
+        send(partnerSlot.ws, { type: 'partner_joined', partner_id: device_id, partner_type: client_type });
+        // Tell new client their partner is already here
+        send(ws, { type: 'partner_joined', partner_id: partnerID, partner_type: partnerSlot.client_type });
+      }
+
+      console.log(`[${pair_id}] + ${device_id} (${client_type})`);
       return;
     }
 
     // ── note ──────────────────────────────────────────────────────────
     if (msg.type === 'note' && ctx) {
-      const partner = getPartner(ctx.pair_id, ctx.device_id);
-      if (partner) {
-        send(partner, { type: 'note', note_id: msg.note_id, sender_id: ctx.device_id });
+      const partnerEntry = getPartnerEntry(ctx.pair_id, ctx.device_id);
+      if (partnerEntry) {
+        const [, partnerSlot] = partnerEntry;
+        send(partnerSlot.ws, { type: 'note', note_id: msg.note_id, sender_id: ctx.device_id });
       }
-      console.log(`[${ctx.pair_id}] ${ctx.device_id} → note_${msg.note_id}  partner=${partner ? 'online' : 'offline'}`);
+      const hasPartner = !!partnerEntry;
+      console.log(`[${ctx.pair_id}] ${ctx.device_id} → note_${msg.note_id}  partner=${hasPartner ? 'online' : 'offline'}`);
     }
   });
 
   ws.on('close', () => {
     if (!ctx) return;
     const { pair_id, device_id } = ctx;
-    const partner = getPartner(pair_id, device_id);
-    if (partner) send(partner, { type: 'partner_left' });
+    const partnerEntry = getPartnerEntry(pair_id, device_id);
+    if (partnerEntry) send(partnerEntry[1].ws, { type: 'partner_left' });
     if (rooms[pair_id]) {
       delete rooms[pair_id][device_id];
       if (!Object.keys(rooms[pair_id]).length) delete rooms[pair_id];

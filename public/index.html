@@ -243,6 +243,39 @@
   }
   .arch-diagram .hi { color: var(--accent); }
 
+  /* ── Client badge ────────────────────────────────────────────────── */
+  .client-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 3px 9px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--muted);
+    transition: all 0.3s;
+    white-space: nowrap;
+  }
+  .client-badge.device {
+    background: #44cc7718;
+    border-color: #44cc7755;
+    color: #44cc77;
+    animation: pulse 2s ease-in-out infinite;
+  }
+  .client-badge.hardware-active {
+    background: #7c6fcd18;
+    border-color: #7c6fcd55;
+    color: var(--accent);
+  }
+
+  /* ── Displaced panel ─────────────────────────────────────────────── */
+  .device-card.displaced .note-btn {
+    opacity: 0.35;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+
   /* ── Scrollbar ───────────────────────────────────────────────────── */
   .log-box::-webkit-scrollbar { width: 4px; }
   .log-box::-webkit-scrollbar-track { background: transparent; }
@@ -268,7 +301,10 @@
           <div class="device-label">Device A</div>
           <div class="device-id">echoA-01</div>
         </div>
-        <div class="status-dot waiting" id="dotA" title="connecting…"></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="client-badge web" id="badgeA">Web Demo</div>
+          <div class="status-dot waiting" id="dotA" title="connecting…"></div>
+        </div>
       </div>
       <div class="notes" id="notesA"></div>
     </div>
@@ -286,7 +322,10 @@
           <div class="device-label">Device B</div>
           <div class="device-id">echoB-02</div>
         </div>
-        <div class="status-dot waiting" id="dotB" title="connecting…"></div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div class="client-badge web" id="badgeB">Web Demo</div>
+          <div class="status-dot waiting" id="dotB" title="connecting…"></div>
+        </div>
       </div>
       <div class="notes" id="notesB"></div>
     </div>
@@ -410,6 +449,22 @@
     dot.className = 'status-dot ' + state;
   }
 
+  // ── Client badges ─────────────────────────────────────────────────────
+  // type: 'web' | 'device' | 'hardware-active'
+  const BADGE_LABELS = { web: 'Web Demo', device: '● Hardware', 'hardware-active': 'Hardware Active' };
+  function setBadge(id, type) {
+    const el = document.getElementById(id);
+    el.className = 'client-badge ' + type;
+    el.textContent = BADGE_LABELS[type] || 'Web Demo';
+  }
+
+  // Maps device_id → which card and badge to update
+  const DEVICE_MAP = {
+    'echoA-01': { card: 'cardA', badge: 'badgeA', dot: 'dotA', notes: 'notesA' },
+    'echoB-02': { card: 'cardB', badge: 'badgeB', dot: 'dotB', notes: 'notesB' },
+  };
+  const PARTNER_OF  = { 'echoA-01': 'echoB-02', 'echoB-02': 'echoA-01' };
+
   // ── Note animation ───────────────────────────────────────────────────
   function animateNote(containerId, noteId, animClass) {
     const btn = document.getElementById(`${containerId}-note-${noteId}`);
@@ -429,54 +484,73 @@
   // ── WebSocket connections ─────────────────────────────────────────
   let wsA, wsB;
 
-  function connect(deviceId, pairId, dotId, onNote) {
+  function connect(deviceId, pairId, onNote) {
+    const own     = DEVICE_MAP[deviceId];
+    const partner = DEVICE_MAP[PARTNER_OF[deviceId]];
     const ws = new WebSocket(WS_URL);
 
     ws.addEventListener('open', () => {
-      ws.send(JSON.stringify({ type: 'join', pair_id: pairId, device_id: deviceId }));
+      // Always join as 'web' — ESP32s join as 'device' from the sketch
+      ws.send(JSON.stringify({ type: 'join', pair_id: pairId, device_id: deviceId, client_type: 'web' }));
     });
 
     ws.addEventListener('message', (e) => {
       const msg = JSON.parse(e.data);
 
       if (msg.type === 'joined') {
-        setDot(dotId, 'waiting');
+        setBadge(own.badge, 'web');
+        setDot(own.dot, 'waiting');
         log(`${deviceId} connected — waiting for partner`, '#5a5a80');
       }
+
       if (msg.type === 'partner_joined') {
-        setDot(dotId, 'online');
-        log(`${deviceId} ↔ partner online`, '#44cc77');
+        const type = msg.partner_type || 'web';
+        setBadge(partner.badge, type);
+        setDot(own.dot, 'online');
+        const label = type === 'device' ? '● hardware device' : 'web demo';
+        log(`${deviceId} ↔ partner online (${label})`, type === 'device' ? '#44cc77' : '#5a5a80');
       }
+
       if (msg.type === 'partner_left') {
-        setDot(dotId, 'waiting');
+        setBadge(partner.badge, 'web');
+        setDot(own.dot, 'waiting');
         log(`${deviceId}: partner disconnected`, '#ff9944');
       }
+
+      // Displaced — a physical device has taken over this slot
+      if (msg.type === 'displaced') {
+        setBadge(own.badge, 'hardware-active');
+        document.getElementById(own.card).classList.add('displaced');
+        log(`${deviceId} slot taken by hardware — web trigger disabled`, '#7c6fcd');
+      }
+
       if (msg.type === 'note') {
         onNote(msg.note_id);
       }
     });
 
     ws.addEventListener('close', () => {
-      setDot(dotId, 'waiting');
-      setTimeout(() => connect(deviceId, pairId, dotId, onNote), 2000);
+      setDot(own.dot, 'waiting');
+      document.getElementById(own.card).classList.remove('displaced');
+      setBadge(own.badge, 'web');
+      setTimeout(() => {
+        if (deviceId === 'echoA-01') wsA = connect(deviceId, pairId, onNote);
+        else                         wsB = connect(deviceId, pairId, onNote);
+      }, 2000);
     });
 
     ws.addEventListener('error', () => ws.close());
-
     return ws;
   }
 
-  // Device A — sends notes, receives nothing in this demo (B is the receiver)
-  wsA = connect('echoA-01', 'pair_001', 'dotA', (noteId) => {
-    // A can also receive from B in a real setup; animate accordingly
+  wsA = connect('echoA-01', 'pair_001', (noteId) => {
     animateNote('notesA', noteId, 'incoming');
-    log(`← echoB-02 sent ${NOTES[noteId].name} (${NOTES[noteId].freq} Hz)`, NOTES[noteId].color.replace('var(', '').replace(')', ''));
+    log(`← echoB-02 → ${NOTES[noteId].name} (${NOTES[noteId].freq} Hz) received on A`, NOTES[noteId].color.replace('var(--','#').replace(')',''));
   });
 
-  // Device B — receive-only in this demo
-  wsB = connect('echoB-02', 'pair_001', 'dotB', (noteId) => {
+  wsB = connect('echoB-02', 'pair_001', (noteId) => {
     animateNote('notesB', noteId, 'incoming');
-    log(`→ echoA-01 triggered ${NOTES[noteId].name} (${NOTES[noteId].freq} Hz) on Device B`, NOTES[noteId].color.replace('var(', '').replace(')', ''));
+    log(`← echoA-01 → ${NOTES[noteId].name} (${NOTES[noteId].freq} Hz) received on B`, NOTES[noteId].color.replace('var(--','#').replace(')',''));
   });
 
   // ── Trigger (Device A button click) ──────────────────────────────
