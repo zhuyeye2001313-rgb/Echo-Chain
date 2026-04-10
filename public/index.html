@@ -518,8 +518,8 @@
       }
 
       // Displaced — a physical device has taken over this slot
+      // Badge is updated via partner_joined on the other connection; just grey out here
       if (msg.type === 'displaced') {
-        setBadge(own.badge, 'hardware-active');
         document.getElementById(own.card).classList.add('displaced');
         log(`${deviceId} slot taken by hardware — web trigger disabled`, '#7c6fcd');
       }
