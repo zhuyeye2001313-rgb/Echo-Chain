@@ -15,7 +15,7 @@
 //
 //  Setup:
 //    1. Fill in WiFi credentials below
-//    2. Set DEVICE_ID to "echoA-01" on one board, "echoB-02" on the other
+//    2. Set PAIR_ID and DEVICE_ID to match the web UI scenario tab
 //    3. Flash, open Serial Monitor at 115200
 // ═══════════════════════════════════════════════════════════════════════
 
@@ -23,17 +23,21 @@
 #include <WebSocketsClient.h>
 
 // ── CONFIGURE THESE ────────────────────────────────────────────────────
-#define WIFI_SSID     ""
-#define WIFI_PASSWORD ""
+#define WIFI_SSID     "dragonfly"
+#define WIFI_PASSWORD "Mpa-2093-1027-2"
 
 #define WS_HOST       "echo-chain-relay-7a6752ad0567.herokuapp.com"
 #define WS_PORT       443
 #define WS_PATH       "/"
 
-#define DEVICE_ID     "echoA-01"   // → "echoB-02" on the other board
-#define PAIR_ID       "pair_001"
+//  Pair IDs match the web UI scenario tabs:
+//    pair_web   → Web ↔ Web       (no hardware needed)
+//    pair_mixed → Web ↔ Hardware  (this board = hw-B, browser = web-A)
+//    pair_hw    → HW  ↔ HW       (hw-A on one board, hw-B on the other)
+#define DEVICE_ID     "hw-B"       // hw-A on the other board
+#define PAIR_ID       "pair_mixed" // match the scenario tab on the web UI
 
-#define OPEN_NETWORK  1  // 1 for open/guest WiFi (no password)
+#define OPEN_NETWORK  0  // 1 for open/guest WiFi (no password)
 // ───────────────────────────────────────────────────────────────────────
 
 // ── PIN ASSIGNMENTS (Arduino Nano ESP32) ───────────────────────────────
