@@ -171,6 +171,21 @@
   }
   .note-name  { font-weight: 600; font-size: 13px; width: 28px; }
   .note-freq  { color: var(--muted); font-size: 12px; font-family: monospace; }
+  .note-key {
+    margin-left: auto;
+    font-family: monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    min-width: 20px;
+    text-align: center;
+    transition: all 0.15s;
+  }
+  .note-btn:hover .note-key { color: var(--text); border-color: var(--accent); }
 
   .note-btn.firing {
     animation: fire 0.35s ease-out forwards;
@@ -504,13 +519,13 @@
 
 <script>
   const NOTES = [
-    { name: 'Do',  freq: 262, color: 'var(--do)'  },
-    { name: 'Re',  freq: 294, color: 'var(--re)'  },
-    { name: 'Mi',  freq: 330, color: 'var(--mi)'  },
-    { name: 'Fa',  freq: 349, color: 'var(--fa)'  },
-    { name: 'Sol', freq: 392, color: 'var(--sol)' },
-    { name: 'La',  freq: 440, color: 'var(--la)'  },
-    { name: 'Ti',  freq: 494, color: 'var(--ti)'  },
+    { name: 'Do',  freq: 262, color: 'var(--do)',  key: 'q' },
+    { name: 'Re',  freq: 294, color: 'var(--re)',  key: 'w' },
+    { name: 'Mi',  freq: 330, color: 'var(--mi)',  key: 'e' },
+    { name: 'Fa',  freq: 349, color: 'var(--fa)',  key: 'r' },
+    { name: 'Sol', freq: 392, color: 'var(--sol)', key: 't' },
+    { name: 'La',  freq: 440, color: 'var(--la)',  key: 'y' },
+    { name: 'Ti',  freq: 494, color: 'var(--ti)',  key: 'u' },
   ];
 
   // ── Scenario definitions ────────────────────────────────────────────
@@ -551,6 +566,7 @@
         <div class="note-pip" style="background:${note.color}"></div>
         <div class="note-name">${note.name}</div>
         <div class="note-freq">${note.freq} Hz</div>
+        ${interactive ? `<div class="note-key">${note.key.toUpperCase()}</div>` : ''}
       `;
       if (interactive && onClickFn) {
         btn.addEventListener('click', () => onClickFn(i));
@@ -790,6 +806,42 @@
   // ── Scenario tab click handlers ───────────────────────────────────────
   document.querySelectorAll('.scenario-btn').forEach(btn => {
     btn.addEventListener('click', () => switchScenario(btn.dataset.scenario));
+  });
+
+  // ── Keyboard shortcuts: Q W E R T Y U → Do Re Mi Fa Sol La Ti ─────────
+  //  Default target: Device A (left panel)
+  //  Hold Shift: target Device B (only when B is interactive in current scenario)
+  const KEY_TO_NOTE = Object.fromEntries(NOTES.map((n, i) => [n.key, i]));
+
+  document.addEventListener('keydown', (e) => {
+    // Ignore when typing in an input/textarea or with modifier combos other than shift
+    if (e.target.matches('input, textarea')) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.repeat) return;  // don't auto-fire on key hold
+
+    const noteId = KEY_TO_NOTE[e.key.toLowerCase()];
+    if (noteId === undefined) return;
+
+    const sc       = SCENARIOS[currentScenario];
+    const wantSide = e.shiftKey ? 'B' : 'A';
+    const cfg      = wantSide === 'A' ? sc.a : sc.b;
+
+    // Only fire if the targeted side is an interactive web slot
+    if (cfg.type !== 'web' || !cfg.interactive) return;
+
+    e.preventDefault();
+    triggerNote(wantSide, noteId);
+
+    // Brief flash on the keycap to confirm the press
+    const btn = document.getElementById(`notes${wantSide}-note-${noteId}`);
+    if (btn) {
+      const cap = btn.querySelector('.note-key');
+      if (cap) {
+        cap.style.background = NOTES[noteId].color;
+        cap.style.color = '#000';
+        setTimeout(() => { cap.style.background = ''; cap.style.color = ''; }, 200);
+      }
+    }
   });
 
   // ── Boot ─────────────────────────────────────────────────────────────
