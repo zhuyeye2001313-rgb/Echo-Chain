@@ -1,74 +1,64 @@
 // ═══════════════════════════════════════════════════════════════════════
-//  EchoChainSocket — v1 Prototype (7 notes: Do → Ti)
-//  Arduino Nano ESP32 + passive buzzer + RGB LED + button
+//  EchoChainSocket — LED Strip + 7 Buttons
+//  Arduino Nano ESP32 + WS2812B strip + passive buzzer + 7 buttons
 //
-//  Required library (install via Arduino Library Manager):
-//    • WebSockets  by Markus Sattler  (search: "WebSockets", author: Links2004)
-//
-//  Wiring:
-//    Buzzer (passive)   → (+) → D7,  (-) → GND
-//    Button (4-prong)   → One side → A7,  Other side → GND
-//    RGB LED module     → (-)  → GND
-//                         (R)  → A0
-//                         (G)  → A1
-//                         (B)  → A2
-//
-//  Setup:
-//    1. Fill in WiFi credentials below
-//    2. Set PAIR_ID and DEVICE_ID to match the web UI scenario tab
-//    3. Flash, open Serial Monitor at 115200
+//  Required libraries:
+//    • WebSockets  by Markus Sattler (Links2004)
+//    • FastLED
 // ═══════════════════════════════════════════════════════════════════════
 
 #include <WiFi.h>
 #include <WebSocketsClient.h>
+#include <FastLED.h>
 
 // ── CONFIGURE THESE ────────────────────────────────────────────────────
-#define WIFI_SSID     "dragonfly"
-#define WIFI_PASSWORD "Mpa-2093-1027-2"
+#define WIFI_SSID     "USC Guest Wireless"
+#define WIFI_PASSWORD ""
 
 #define WS_HOST       "echo-chain-relay-7a6752ad0567.herokuapp.com"
 #define WS_PORT       443
 #define WS_PATH       "/"
 
-//  Pair IDs match the web UI scenario tabs:
-//    pair_web   → Web ↔ Web       (no hardware needed)
-//    pair_mixed → Web ↔ Hardware  (this board = hw-B, browser = web-A)
-//    pair_hw    → HW  ↔ HW       (hw-A on one board, hw-B on the other)
 #define DEVICE_ID     "hw-B"       // hw-A on the other board
-#define PAIR_ID       "pair_mixed" // match the scenario tab on the web UI
+#define PAIR_ID       "pair_hw"    // match the scenario tab on the web UI
 
-#define OPEN_NETWORK  0  // 1 for open/guest WiFi (no password)
+#define OPEN_NETWORK  1
 // ───────────────────────────────────────────────────────────────────────
 
-// ── PIN ASSIGNMENTS (Arduino Nano ESP32) ───────────────────────────────
-#define BTN_PIN      A7   // Button → GND
-#define SPEAKER_PIN  D7   // Buzzer positive wire
-#define LED_R        A0   // RGB module R
-#define LED_G        A1   // RGB module G
-#define LED_B        A2   // RGB module B
+// ── PIN ASSIGNMENTS ────────────────────────────────────────────────────
+#define LED_PIN       5       // 板子上的 D2
+#define SPEAKER_PIN   D9
+
+// 7 个按钮引脚（顺序对应 Do Re Mi Fa Sol La Ti）
+const int BTN_PINS[] = { D11, D10, D8, D7, D6, D5, D4 };
+
+// ── LED STRIP CONFIG ───────────────────────────────────────────────────
+#define NUM_LEDS      10
+#define LED_TYPE      WS2812B
+#define COLOR_ORDER   GRB
+#define BRIGHTNESS    50
+
+#define NOTE_DUR      500   // ms
 // ───────────────────────────────────────────────────────────────────────
 
-#define NOTE_DUR  1000  // ms — duration for all notes
+CRGB leds[NUM_LEDS];
 
 // ── Note table (Do → Ti) ───────────────────────────────────────────────
-//  With 3 LED channels (R/G/B on/off), we get 7 distinct colors:
-//    Do  = Red        Re = Yellow (R+G)   Mi  = Green
-//    Fa  = Cyan (G+B) Sol = Blue          La  = Magenta (R+B)
-//    Ti  = White (R+G+B)
 struct Note {
   const char* name;
   int freq;
-  bool r, g, b;
+  uint8_t r, g, b;
+  int ledIndex;
 };
 
 const Note NOTES[] = {
-  { "Do",  262, 1, 0, 0 },  // 0 — Red
-  { "Re",  294, 1, 1, 0 },  // 1 — Yellow
-  { "Mi",  330, 0, 1, 0 },  // 2 — Green
-  { "Fa",  349, 0, 1, 1 },  // 3 — Cyan
-  { "Sol", 392, 0, 0, 1 },  // 4 — Blue
-  { "La",  440, 1, 0, 1 },  // 5 — Magenta
-  { "Ti",  494, 1, 1, 1 },  // 6 — White
+  { "Do",  262, 255,   0,   0,  0 },  // 0 — Red
+  { "Re",  294, 255, 128,   0,  1 },  // 1 — Orange
+  { "Mi",  330, 255, 255,   0,  2 },  // 2 — Yellow
+  { "Fa",  349,   0, 255,   0,  3 },  // 3 — Green
+  { "Sol", 392,   0, 128, 255,  4 },  // 4 — Blue
+  { "La",  440, 128,   0, 255,  5 },  // 5 — Purple
+  { "Ti",  494, 255,   0, 255,  6 },  // 6 — Magenta
 };
 
 const int NUM_NOTES = 7;
@@ -77,23 +67,27 @@ WebSocketsClient ws;
 bool partnerOnline = false;
 bool wsConnected   = false;
 
+// 按钮边沿检测（7 个按钮的上一次状态）
+bool lastBtn[7] = { HIGH, HIGH, HIGH, HIGH, HIGH, HIGH, HIGH };
+
 // ── LED helpers ─────────────────────────────────────────────────────────
 void ledOff() {
-  digitalWrite(LED_R, LOW);
-  digitalWrite(LED_G, LOW);
-  digitalWrite(LED_B, LOW);
+  FastLED.clear();
+  FastLED.show();
 }
 
-void ledColor(bool r, bool g, bool b) {
-  digitalWrite(LED_R, r ? HIGH : LOW);
-  digitalWrite(LED_G, g ? HIGH : LOW);
-  digitalWrite(LED_B, b ? HIGH : LOW);
+void ledShowNote(int noteId) {
+  if (noteId < 0 || noteId >= NUM_NOTES) return;
+  const Note& n = NOTES[noteId];
+  FastLED.clear();
+  leds[n.ledIndex] = CRGB(n.r, n.g, n.b);
+  FastLED.show();
 }
 
-// ── Speaker helper (software square wave — no LEDC, no conflicts) ──────
+// ── Speaker helper (software square wave) ──────────────────────────────
 void buzzerTone(int freq, int duration) {
   unsigned long endTime = millis() + duration;
-  int halfPeriod = 500000 / freq;  // microseconds
+  int halfPeriod = 500000 / freq;
   while (millis() < endTime) {
     digitalWrite(SPEAKER_PIN, HIGH);
     delayMicroseconds(halfPeriod);
@@ -102,12 +96,11 @@ void buzzerTone(int freq, int duration) {
   }
 }
 
-// ── Play a note by ID: LED color + buzzer tone ─────────────────────────
+// ── Play a note: LED + buzzer ──────────────────────────────────────────
 void fireNote(int noteId) {
   if (noteId < 0 || noteId >= NUM_NOTES) return;
-  const Note& n = NOTES[noteId];
-  ledColor(n.r, n.g, n.b);
-  buzzerTone(n.freq, NOTE_DUR);
+  ledShowNote(noteId);
+  buzzerTone(NOTES[noteId].freq, NOTE_DUR);
   ledOff();
 }
 
@@ -135,9 +128,9 @@ void sendNote(int noteId) {
 // ── Parse note_id from incoming JSON ────────────────────────────────────
 int parseNoteId(const String& msg) {
   int idx = msg.indexOf("\"note_id\":");
-  if (idx == -1) return 0;  // default to Do
-  idx += 10;  // skip past "note_id":
-  while (idx < (int)msg.length() && msg[idx] == ' ') idx++;  // skip spaces
+  if (idx == -1) return 0;
+  idx += 10;
+  while (idx < (int)msg.length() && msg[idx] == ' ') idx++;
   return msg.substring(idx).toInt();
 }
 
@@ -161,14 +154,14 @@ void onWSEvent(WStype_t type, uint8_t* payload, size_t length) {
       String msg = String((char*)payload);
       Serial.println("RX: " + msg);
 
-      if (msg.indexOf("\"joined\"") > -1)
+      if (msg.indexOf("\"joined\"") > -1) {
         Serial.println("[socket] Joined relay as " DEVICE_ID);
-
+      }
       else if (msg.indexOf("\"partner_joined\"") > -1) {
         partnerOnline = true;
-        Serial.println("[socket] Partner is online — ready to send notes.");
-        // Quick green flash to confirm pairing
-        ledColor(false, true, false);
+        Serial.println("[socket] Partner is online!");
+        fill_solid(leds, NUM_LEDS, CRGB::Green);
+        FastLED.show();
         delay(200);
         ledOff();
       }
@@ -197,32 +190,37 @@ void setup() {
   delay(1000);
 
   Serial.println("========================================");
-  Serial.println("  EchoChain v1 — booting...");
+  Serial.println("  EchoChain 7-Note Version — booting...");
   Serial.println("========================================");
 
-  // Pin setup
-  pinMode(BTN_PIN, INPUT_PULLUP);
+  // Button pins (7 个)
+  for (int i = 0; i < NUM_NOTES; i++) {
+    pinMode(BTN_PINS[i], INPUT_PULLUP);
+  }
+
+  // Speaker
   pinMode(SPEAKER_PIN, OUTPUT);
   digitalWrite(SPEAKER_PIN, LOW);
-  pinMode(LED_R, OUTPUT);
-  pinMode(LED_G, OUTPUT);
-  pinMode(LED_B, OUTPUT);
+
+  // LED strip
+  FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS);
+  FastLED.setBrightness(BRIGHTNESS);
   ledOff();
 
-  // Boot LED test: R → G → B, 200ms each
-  Serial.println("[led]    Boot test: R...");
-  ledColor(true, false, false); delay(200);
-  Serial.println("[led]    Boot test: G...");
-  ledColor(false, true, false); delay(200);
-  Serial.println("[led]    Boot test: B...");
-  ledColor(false, false, true); delay(200);
+  // Boot test: 走一圈 7 色
+  Serial.println("[led]    Boot test: Do → Ti");
+  for (int i = 0; i < NUM_NOTES; i++) {
+    ledShowNote(i);
+    delay(200);
+  }
   ledOff();
   Serial.println("[led]    Boot test done.");
 
-  // Blue LED while connecting WiFi
-  ledColor(false, false, true);
+  // 蓝色表示正在连 WiFi
+  fill_solid(leds, NUM_LEDS, CRGB(0, 0, 40));
+  FastLED.show();
 
-  // Connect to WiFi
+  // WiFi
   Serial.print("[wifi]   Connecting to " WIFI_SSID);
   #if OPEN_NETWORK
     WiFi.begin(WIFI_SSID);
@@ -237,7 +235,7 @@ void setup() {
   Serial.println("\n[wifi]   Connected — IP: " + WiFi.localIP().toString());
   ledOff();
 
-  // Connect WebSocket (SSL to Heroku)
+  // WebSocket (SSL)
   ws.beginSSL(WS_HOST, WS_PORT, WS_PATH);
   ws.onEvent(onWSEvent);
   ws.setReconnectInterval(3000);
@@ -250,22 +248,32 @@ void setup() {
 void loop() {
   ws.loop();
 
-  // Physical button = Do (note 0) — more buttons can be added later
-  if (wsConnected && digitalRead(BTN_PIN) == LOW) {
-    Serial.println("[btn]    Do pressed!");
-    fireNote(0);  // local feedback
+  // 扫描所有 7 个按钮
+  for (int i = 0; i < NUM_NOTES; i++) {
+    bool btn = digitalRead(BTN_PINS[i]);
 
-    if (partnerOnline) {
-      sendNote(0);
-    } else {
-      Serial.println("[btn]    Partner not online — note played locally only.");
+    // 边沿检测：从 HIGH 跳到 LOW = 刚按下
+    if (btn == LOW && lastBtn[i] == HIGH) {
+      Serial.println("[btn" + String(i + 1) + "]   " +
+                     String(NOTES[i].name) + " pressed!");
+      
+
+      if (wsConnected && partnerOnline) {
+        sendNote(i);
+      } else if (wsConnected) {
+        Serial.println("[btn" + String(i + 1) + "]   Partner not online — local only.");
+      }
+
+      fireNote(i);
+
+      // 等松开 + 消抖
+      while (digitalRead(BTN_PINS[i]) == LOW) {
+        ws.loop();
+        delay(10);
+      }
+      delay(50);
     }
 
-    // Debounce: wait for release
-    while (digitalRead(BTN_PIN) == LOW) {
-      ws.loop();  // keep WebSocket alive during hold
-      delay(10);
-    }
-    delay(50);
+    lastBtn[i] = btn;
   }
 }
