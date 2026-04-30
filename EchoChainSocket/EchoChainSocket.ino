@@ -26,22 +26,21 @@ const int BTN_PINS[] = { D11, D10, D8, D7, D6, D5, D4 };
 
 CRGB leds[NUM_LEDS];
 
-// ── NOTE STRUCT（⭐含LED索引） ─────────
+// ── NOTE ────────────────────────────
 struct Note {
-  const char* name;
   int freq;
   uint8_t r, g, b;
   int ledIndex;
 };
 
 const Note NOTES[] = {
-  { "Do", 262, 255,   0,   0, 0 },   // 🔴 红
-  { "Re", 294, 255, 100,   0, 1 },   // 🟠 橙
-  { "Mi", 330, 255, 255,   0, 2 },   // 🟡 黄
-  { "Fa", 349,   0, 255,   0, 3 },   // 🟢 绿
-  { "Sol",392,   0, 255, 255, 4 },   // 🔵 青（Cyan）
-  { "La", 440,   0,   0, 255, 5 },   // 🔵 蓝
-  { "Ti", 494, 255,   0, 255, 6 }    // 🟣 紫
+  {262, 255,   0,   0, 0}, // 红
+  {294, 255, 100,   0, 1}, // 橙（偏橘）
+  {330, 255, 255,   0, 2}, // 黄
+  {349,   0, 255,   0, 3}, // 绿
+  {392,   0, 255, 255, 4}, // 青
+  {440,   0,   0, 255, 5}, // 蓝
+  {494, 255,   0, 255, 6}  // 紫
 };
 
 #define NUM_NOTES 7
@@ -57,7 +56,11 @@ bool lastBtn[7] = {HIGH,HIGH,HIGH,HIGH,HIGH,HIGH,HIGH};
 int currentNote = -1;
 int currentFreq = 0;
 
-// ── LED FUNCTIONS ───────────────────
+// ⭐ 防止网页卡音
+unsigned long lastNoteTime = 0;
+const int NOTE_TIMEOUT = 300;
+
+// ── LED ─────────────────────────────
 void ledOff() {
   FastLED.clear();
   FastLED.show();
@@ -65,15 +68,11 @@ void ledOff() {
 
 void ledShowOne(int noteId) {
   FastLED.clear();
-
-  int idx = NOTES[noteId].ledIndex;
-
-  leds[idx] = CRGB(
+  leds[NOTES[noteId].ledIndex] = CRGB(
     NOTES[noteId].r,
     NOTES[noteId].g,
     NOTES[noteId].b
   );
-
   FastLED.show();
 }
 
@@ -129,6 +128,8 @@ void onWSEvent(WStype_t type, uint8_t* payload, size_t length) {
         currentNote = id;
         startTone(NOTES[id].freq);
         ledShowOne(id);
+
+        lastNoteTime = millis(); // ⭐关键
       }
     }
   }
@@ -160,7 +161,7 @@ void loop() {
 
   ws.loop();
 
-  // 🎵 持续发声（非阻塞）
+  // 🎵 持续发声
   if (currentFreq > 0) {
     int halfPeriod = 500000 / currentFreq;
     digitalWrite(SPEAKER_PIN, HIGH);
@@ -169,7 +170,7 @@ void loop() {
     delayMicroseconds(halfPeriod);
   }
 
-  // 🔘 按钮检测
+  // 🔘 硬件按钮
   for (int i = 0; i < NUM_NOTES; i++) {
 
     bool btn = digitalRead(BTN_PINS[i]);
@@ -180,6 +181,8 @@ void loop() {
       currentNote = i;
       startTone(NOTES[i].freq);
       ledShowOne(i);
+
+      lastNoteTime = millis();  // ⭐关键修复（不被timeout杀掉）
 
       if (lastBtn[i] == HIGH && wsConnected && partnerOnline) {
         sendNote(i);
@@ -196,5 +199,12 @@ void loop() {
     }
 
     lastBtn[i] = btn;
+  }
+
+  // ⭐ 自动停止（网页防卡）
+  if (currentFreq > 0 && millis() - lastNoteTime > NOTE_TIMEOUT) {
+    stopTone();
+    ledOff();
+    currentNote = -1;
   }
 }
