@@ -474,9 +474,10 @@
           <p>A pair of physical devices that mirror musical note presses between each other in real time. Press a button on one device — the partner device lights up and sounds the same note, wherever it is in the world.</p>
           <br>
           <ul>
-            <li>7 notes per device (Do → Ti)</li>
-            <li>RGB LED + passive buzzer output per note</li>
-            <li>Arduino Nano ESP32 (WiFi + WebSocket)</li>
+            <li>7 notes per device (Do → Ti) — direct-wired buttons on D11, D10, D8, D7, D6, D5, D4</li>
+            <li>WS2812B LED strip (D2) + passive buzzer (D9) for visual + audio output</li>
+            <li>Arduino Nano ESP32 — WiFi + WebSocket (SSL) over Heroku relay</li>
+            <li>Power-on signature: boot melody plays Do→Re→Mi pause Sol→La→Ti</li>
           </ul>
         </div>
 
@@ -489,25 +490,27 @@
           </ul>
           <br>
           <p>Flash each ESP with the matching <code>PAIR_ID</code> and the correct <code>DEVICE_ID</code> (<code>hw-A</code> or <code>hw-B</code>).</p>
+          <br>
+          <p>Keyboard: <code>Q W E R T Y U</code> = Do → Ti on Device A. Hold <code>Shift</code> for Device B.</p>
         </div>
 
         <div class="note-block">
           <h3>Current Architecture</h3>
           <div class="arch-diagram"><span class="hi">[ Device A ]</span>  ←──────────────→  <span class="hi">[ Device B ]</span>
        ↕                                    ↕
-  <span class="hi">[ Heroku WS Relay ]</span>  ←── routes ──→  <span class="hi">[ Heroku WS Relay ]</span>
-       ↕                                    ↕
-  <span class="hi">[ Firebase ]</span>             <span class="hi">[ Firebase ]</span>
-  (event log)              (event log)</div>
+       └──────→  <span class="hi">[ Heroku WS Relay ]</span>  ←──────┘
+                  (routes by pair_id)</div>
+          <br>
+          <p>Stateless relay — pairs are ephemeral and join by ID. No event log persistence.</p>
         </div>
 
         <div class="note-block">
           <h3>Next Steps</h3>
           <ul>
-            <li>Visual design pass on this interface</li>
-            <li>Add remaining 6 note buttons to hardware</li>
+            <li>3D-printed enclosures for both hardware devices (in progress)</li>
+            <li>Hold-to-play tone model (currently 500ms blocking per press)</li>
+            <li>Polyphonic visual support — overlapping notes</li>
             <li>Pair management UI (create / join pair codes)</li>
-            <li>Firebase event history view</li>
           </ul>
         </div>
 
